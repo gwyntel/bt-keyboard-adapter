@@ -54,6 +54,9 @@ BLE_UUID_CHR_PROTOCOL_MODE = "00002a4e-0000-1000-8000-00805f9b34fb"
 BLE_UUID_CHR_PNP_ID = "00002a50-0000-1000-8000-00805f9b34fb"
 BLE_UUID_APPEARANCE = "00002a01-0000-1000-8000-00805f9b34fb"
 BLE_UUID_DEVICE_NAME = "00002a00-0000-1000-8000-00805f9b34fb"
+BLE_UUID_DIS = "0000180a-0000-1000-8000-00805f9b34fb"
+BLE_UUID_MANUFACTURER_NAME = "00002a29-0000-1000-8000-00805f9b34fb"
+BLE_UUID_MODEL_NUMBER = "00002a24-0000-1000-8000-00805f9b34fb"
 
 SERVICE_APP_PATH = "/com/crackedbook/kbd"
 SERVICE_PATH = "/com/crackedbook/kbd/service"
@@ -330,7 +333,7 @@ class Descriptor(dbus.service.Object):
 # ---------------------------------------------------------------------------
 class ProtocolModeCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
-        super().__init__(bus, index, BLE_UUID_CHR_PROTOCOL_MODE, ["read"], service)
+        super().__init__(bus, index, BLE_UUID_CHR_PROTOCOL_MODE, ["read", "encrypt-read", "encrypt-write"], service)
         self.value = [dbus.Byte(1)]  # Report Protocol (default is report mode)
 
     def ReadValueInternal(self, options):
@@ -345,7 +348,7 @@ class ProtocolModeCharacteristic(Characteristic):
 
 class ReportMapCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
-        super().__init__(bus, index, BLE_UUID_CHR_HID_REPORT_MAP, ["read"], service)
+        super().__init__(bus, index, BLE_UUID_CHR_HID_REPORT_MAP, ["read", "encrypt-read"], service)
         self.value = [dbus.Byte(b) for b in REPORT_MAP]
 
     def ReadValueInternal(self, options):
@@ -354,7 +357,7 @@ class ReportMapCharacteristic(Characteristic):
 
 class HIDInformationCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
-        super().__init__(bus, index, BLE_UUID_CHR_HID_INFO, ["read"], service)
+        super().__init__(bus, index, BLE_UUID_CHR_HID_INFO, ["read", "encrypt-read"], service)
         self.value = [dbus.Byte(b) for b in HID_INFO]
 
     def ReadValueInternal(self, options):
@@ -363,7 +366,7 @@ class HIDInformationCharacteristic(Characteristic):
 
 class HIDControlPointCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
-        super().__init__(bus, index, BLE_UUID_CHR_HID_CONTROL_POINT, ["write"], service)
+        super().__init__(bus, index, BLE_UUID_CHR_HID_CONTROL_POINT, ["write", "encrypt-write"], service)
 
     def WriteValueInternal(self, value, options):
         val = int.from_bytes(bytes(value), "little")
@@ -376,7 +379,7 @@ class ReportCharacteristic(Characteristic):
     """Keyboard input report (notify)."""
 
     def __init__(self, bus, index, service, report_type="input"):
-        flags_enable_notify = ["read", "notify"]
+        flags_enable_notify = ["read", "notify", "encrypt-read", "encrypt-notify"]
         super().__init__(
             bus, index, BLE_UUID_CHR_HID_REPORT, flags_enable_notify, service
         )
@@ -405,7 +408,7 @@ class ReportReferenceDescriptor(Descriptor):
 
     def __init__(self, bus, index, characteristic):
         super().__init__(
-            bus, index, "00002908-0000-1000-8000-00805f9b34fb", ["read"], characteristic
+            bus, index, "00002908-0000-1000-8000-00805f9b34fb", ["read", "encrypt-read"], characteristic
         )
         # Report ID = 0, Report Type = 1 (Input)
         self.value = [dbus.Byte(0), dbus.Byte(1)]
@@ -434,8 +437,30 @@ class CCCDDescriptor(Descriptor):
 
 class PNPCharacteristic(Characteristic):
     def __init__(self, bus, index, service):
-        super().__init__(bus, index, BLE_UUID_CHR_PNP_ID, ["read"], service)
+        super().__init__(bus, index, BLE_UUID_CHR_PNP_ID, ["read", "encrypt-read"], service)
         self.value = [dbus.Byte(b) for b in PNP_ID]
+
+    def ReadValueInternal(self, options):
+        return self.value
+
+
+# --------------------------------------------------------------------------- #
+# Device Information Service (0x180A) characteristics
+# iOS requires DIS to be present for HOGP devices.
+# --------------------------------------------------------------------------- #
+class ManufacturerNameCharacteristic(Characteristic):
+    def __init__(self, bus, index, service):
+        super().__init__(bus, index, BLE_UUID_MANUFACTURER_NAME, ["read"], service)
+        self.value = [dbus.Byte(b) for b in b"GwynTel"]
+
+    def ReadValueInternal(self, options):
+        return self.value
+
+
+class ModelNumberCharacteristic(Characteristic):
+    def __init__(self, bus, index, service):
+        super().__init__(bus, index, BLE_UUID_MODEL_NUMBER, ["read"], service)
+        self.value = [dbus.Byte(b) for b in b"bt-keyboard-adapter"]
 
     def ReadValueInternal(self, options):
         return self.value
@@ -938,6 +963,15 @@ def main():
     # 'notify' flag. We do NOT add a custom CCCD descriptor — doing so creates
     # a duplicate that conflicts with BlueZ's internal CCCD handling.
     app.add_service(hid_svc)
+
+    # Device Information Service (0x180A) — required by iOS for HOGP devices.
+    # BlueZ does NOT auto-provide this (unlike GAP 0x1800 / GATT 0x1801).
+    dis_svc = Service(bus, 1, BLE_UUID_DIS, True)
+    manufacturer = ManufacturerNameCharacteristic(bus, 0, dis_svc)
+    model = ModelNumberCharacteristic(bus, 1, dis_svc)
+    dis_svc.add_characteristic(manufacturer)
+    dis_svc.add_characteristic(model)
+    app.add_service(dis_svc)
 
     keyboard.report_char = report
     print(f"  GATT application registered; report char path={report.get_path()}")
