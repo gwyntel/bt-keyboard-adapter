@@ -57,6 +57,8 @@ BLE_UUID_DEVICE_NAME = "00002a00-0000-1000-8000-00805f9b34fb"
 BLE_UUID_DIS = "0000180a-0000-1000-8000-00805f9b34fb"
 BLE_UUID_MANUFACTURER_NAME = "00002a29-0000-1000-8000-00805f9b34fb"
 BLE_UUID_MODEL_NUMBER = "00002a24-0000-1000-8000-00805f9b34fb"
+BLE_UUID_BATTERY = "0000180f-0000-1000-8000-00805f9b34fb"
+BLE_UUID_BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"
 
 SERVICE_APP_PATH = "/com/crackedbook/kbd"
 SERVICE_PATH = "/com/crackedbook/kbd/service"
@@ -464,6 +466,24 @@ class ModelNumberCharacteristic(Characteristic):
 
     def ReadValueInternal(self, options):
         return self.value
+
+
+# --------------------------------------------------------------------------- #
+# Battery Service (0x180F) characteristics
+# Required by HOGP spec. iOS/macOS won't enumerate HID device without it.
+# Reads live battery level from /sys/class/power_supply/BAT*/capacity.
+# --------------------------------------------------------------------------- #
+class BatteryLevelCharacteristic(Characteristic):
+    def __init__(self, bus, index, service):
+        super().__init__(bus, index, BLE_UUID_BATTERY_LEVEL, ["read", "notify"], service)
+
+    def ReadValueInternal(self, options):
+        try:
+            with open("/sys/class/power_supply/BAT0/capacity") as f:
+                level = int(f.read().strip())
+        except (OSError, ValueError):
+            level = 100
+        return [dbus.Byte(level)]
 
 
 class AppearanceCharacteristic(Characteristic):
@@ -972,6 +992,12 @@ def main():
     dis_svc.add_characteristic(manufacturer)
     dis_svc.add_characteristic(model)
     app.add_service(dis_svc)
+
+    # Battery Service (0x180F) — required by HOGP spec for iOS/macOS.
+    bat_svc = Service(bus, 3, BLE_UUID_BATTERY, True)
+    bat_level = BatteryLevelCharacteristic(bus, 0, bat_svc)
+    bat_svc.add_characteristic(bat_level)
+    app.add_service(bat_svc)
 
     keyboard.report_char = report
     print(f"  GATT application registered; report char path={report.get_path()}")
