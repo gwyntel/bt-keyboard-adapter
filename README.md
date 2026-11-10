@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gwyntel/bt-keyboard-adapter)
+
 # bt-keyboard-adapter
 
 Turn any Linux machine into a BLE HID keyboard. Reads from a physical evdev keyboard device and forwards keystrokes over Bluetooth Low Energy HID-over-GATT to a paired phone or tablet.
